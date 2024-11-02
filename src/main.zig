@@ -15,14 +15,14 @@ const Button = @import("./ui/button.zig").Button;
 
 const buffer_print_width = 512;
 const buffer_print_height = 512;
-const scale = 1;
+const scale = 2;
 const buffer_width = buffer_print_width / scale;
 const buffer_height = buffer_print_height / scale;
 
-const win_width = 10 + buffer_print_width + 10 + 100 + 10;
+const win_width = 10 + buffer_print_width + 10 + 130 + 10;
 const win_height = 10 + buffer_print_height + 10;
 
-const thread_count = 8;
+const thread_count = 16;
 const thread_workload = buffer_height / (thread_count - 1);
 
 const world_type = World(bool, buffer_width, buffer_height);
@@ -38,6 +38,8 @@ pub fn main() !void {
     // state
     var is_running: bool = false;
     var is_running_one_frame: bool = false;
+    var use_multithreading: bool = true;
+    var auto_swap: bool = true;
 
     // Initialize random
     var prng = std.rand.DefaultPrng.init(blk: {
@@ -46,7 +48,6 @@ pub fn main() !void {
         break :blk seed;
     });
     const rand = prng.random();
-    _ = (rand);
 
     // Load Input
     const input_file = fs.cwd().openFile("input.ppm", .{}) catch unreachable;
@@ -87,17 +88,25 @@ pub fn main() !void {
     var wld = world_type.init(false);
 
     // UI
-    var play_pause_btn = Button.init(10 + buffer_print_width + 10, 10, 100, 30, "PLAY / PAUSE");
+    var play_pause_btn = Button.init(10 + buffer_print_width + 10, 10, 130, 20, "PLAY / PAUSE");
     play_pause_btn.on_click = play_pause_on_click;
     play_pause_btn.on_click_state = @as(*anyopaque, @ptrCast(&is_running));
 
-    var one_frame_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 + 10, 100, 30, "ONE FRAME");
+    var one_frame_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 1, 130, 20, "ONE FRAME");
     one_frame_btn.on_click = one_frame_on_click;
     one_frame_btn.on_click_state = @as(*anyopaque, @ptrCast(&is_running_one_frame));
 
-    var swap_buffers_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 + 10 + 30 + 10, 100, 30, "SWAP BUFFERS");
+    var swap_buffers_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 2, 130, 20, "SWAP BUFFERS");
     swap_buffers_btn.on_click = swap_buffers_on_click;
     swap_buffers_btn.on_click_state = @as(*anyopaque, @ptrCast(&wld.current_buffer));
+    
+    var multithreading_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 3, 130, 20, "TOGGLE THREADS");
+    multithreading_btn.on_click = multithreading_on_click;
+    multithreading_btn.on_click_state = @as(*anyopaque, @ptrCast(&use_multithreading));
+
+    var auto_swap_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 4, 130, 20, "TOGGLE AUTO SWAP");
+    auto_swap_btn.on_click = autoswap_on_click;
+    auto_swap_btn.on_click_state = @as(*anyopaque, @ptrCast(&auto_swap));
 
     // Initialize raylib
     rl.initWindow(win_width, win_height, "HADES - Complexity of Simplicity - Generalized Cellular Automaton");
@@ -130,13 +139,15 @@ pub fn main() !void {
         play_pause_btn.update();
         one_frame_btn.update();
         swap_buffers_btn.update();
+        multithreading_btn.update();
+        auto_swap_btn.update();
 
         if (is_running) {
-            world_rule(&wld, inner_kernel, outer_kernel);
+            world_rule(&wld, inner_kernel, outer_kernel, use_multithreading, auto_swap);
         } else if (is_running_one_frame) {
             is_running_one_frame = false;
             const sw = stopwatch.MicroStopwatch.init();
-            world_rule(&wld, inner_kernel, outer_kernel);
+            world_rule(&wld, inner_kernel, outer_kernel, use_multithreading, auto_swap);
             std.debug.print("RULE: {d}\n", .{sw.getTime()});
         }
         
@@ -153,27 +164,29 @@ pub fn main() !void {
             play_pause_btn.draw();
             one_frame_btn.draw();
             swap_buffers_btn.draw();
+            multithreading_btn.draw();
+            auto_swap_btn.draw();
 
             rl.drawFPS(rl.getScreenWidth() - 90, rl.getScreenHeight() - 30);
         }
 
-        // if (rl.checkCollisionPointRec(rl.getMousePosition(), target_dest)) {
-        //     if (rl.isMouseButtonDown(.mouse_button_left)) {
-        //         const mouse_pos = rl.getMousePosition().subtractValue(10.0);
-        //         const pos = tp.Vec2.fromRaylib(mouse_pos).toVec2i();
+        if (rl.checkCollisionPointRec(rl.getMousePosition(), target_dest)) {
+            if (rl.isMouseButtonDown(.mouse_button_left)) {
+                const mouse_pos = rl.getMousePosition().subtractValue(10.0).divide(rl.Vector2.init(scale, scale));
+                const pos = tp.Vec2.fromRaylib(mouse_pos).toVec2i();
                    
-        //         var y = pos.y - 16;
-        //         while (y <= pos.y + 16) {
-        //             var x = pos.x - 16;
-        //             while (x <= pos.x + 16) {
-        //                 const p = tp.Vec2i.new(x, y);
-        //                 wld.setMain(p, rand.boolean());
-        //                 x += 1; 
-        //             }
-        //             y += 1;
-        //         }
-        //     }
-        // }
+                var y = pos.y - 16;
+                while (y <= pos.y + 16) {
+                    var x = pos.x - 16;
+                    while (x <= pos.x + 16) {
+                        const p = tp.Vec2i.new(x, y);
+                        wld.setMainV(p, rand.boolean());
+                        x += 1; 
+                    }
+                    y += 1;
+                }
+            }
+        }
     }
 }
 
@@ -209,37 +222,68 @@ fn world_rule_chunk(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel
     }
 }
 
-fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel) void {
-    var thread_array: [thread_count]std.Thread = undefined;
+fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel, use_multithreading: bool, auto_swap: bool) void {
+    if (use_multithreading) {
+        var thread_array: [thread_count]std.Thread = undefined;
 
-    for (0..thread_count) |thread_id| {
-        if (thread_id != thread_count - 1) {
-            const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
-                wld,
-                inner_kernel, outer_kernel,
-                thread_id * thread_workload,
-                thread_id * thread_workload + thread_workload,
-            }) catch unreachable;
-            thread_array[thread_id] = thread;
-        } else {
-            // if (thread_id * thread_workload >= buffer_height) continue;
-            const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
-                wld,
-                inner_kernel, outer_kernel,
-                thread_id * thread_workload,
-                buffer_height,
-            }) catch unreachable;
-            thread_array[thread_id] = thread;
+        for (0..thread_count) |thread_id| {
+            if (thread_id != thread_count - 1) {
+                const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
+                    wld,
+                    inner_kernel, outer_kernel,
+                    thread_id * thread_workload,
+                    thread_id * thread_workload + thread_workload,
+                }) catch unreachable;
+                thread_array[thread_id] = thread;
+            } else {
+                // if (thread_id * thread_workload >= buffer_height) continue;
+                const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
+                    wld,
+                    inner_kernel, outer_kernel,
+                    thread_id * thread_workload,
+                    buffer_height,
+                }) catch unreachable;
+                thread_array[thread_id] = thread;
+            }
+        }
+
+        for (thread_array, 0..) |thread, thread_id| {
+            _ = thread_id;
+            thread.join();
+        }
+    } else {
+        for (0..buffer_height) |y| {
+            for (0..buffer_width) |x| {
+                const pos = tp.Vec2i.fromUsize(x, y);
+
+                var inner_sum: f32 = 0.0;
+                for (inner_kernel.mask_list.items) |k_pos| {
+                    if (wld.getMainV(pos.addvn(k_pos))) inner_sum += 1.0;
+                }
+                const inner_avrg = inner_sum / @as(f32, @floatFromInt(inner_kernel.mask_list.items.len));
+
+                var outer_sum: f32 = 0.0;
+                for (outer_kernel.mask_list.items) |k_pos| {
+                    if (wld.getMainV(pos.addvn(k_pos))) outer_sum += 1.0;
+                }
+                const outer_avrg = outer_sum / @as(f32, @floatFromInt(outer_kernel.mask_list.items.len));
+
+                if (
+                    inner_avrg >= 0.5 and 0.26 <= outer_avrg and outer_avrg <= 0.46
+                ) {
+                    wld.setBg(x, y, true);
+                } else if (
+                    inner_avrg < 0.5 and 0.27 <= outer_avrg and outer_avrg <= 0.36
+                ) {
+                    wld.setBg(x, y, true);
+                } else {
+                    wld.setBg(x, y, false);
+                }
+            }
         }
     }
-
-    for (thread_array, 0..) |thread, thread_id| {
-        _ = thread_id;
-        thread.join();
-    }
     
-    
-    wld.swapBuffers();
+    if (auto_swap) { wld.swapBuffers(); }
 }
 
 fn world_draw(wld: *const world_type, target: rl.RenderTexture2D, camera: rl.Camera2D) void {
@@ -271,6 +315,20 @@ fn world_draw(wld: *const world_type, target: rl.RenderTexture2D, camera: rl.Cam
                 }
             }
         }
+    }
+}
+
+fn autoswap_on_click(optional_state: ?*anyopaque) void {
+    if (optional_state) |state| {
+        const auto_swap = @as(*bool, @ptrCast(state));
+        auto_swap.* = !auto_swap.*;
+    }
+}
+
+fn multithreading_on_click(optional_state: ?*anyopaque) void {
+    if (optional_state) |state| {
+        const use_multithreading = @as(*bool, @ptrCast(state));
+        use_multithreading.* = !use_multithreading.*;
     }
 }
 
