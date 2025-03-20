@@ -29,9 +29,7 @@ const world_type = World(bool, buffer_width, buffer_height);
 
 pub fn main() !void {
     // Initialize Allocator
-    var gpa = std.heap.GeneralPurposeAllocator(.{
-        .thread_safe = true
-    }){};
+    var gpa = std.heap.GeneralPurposeAllocator(.{ .thread_safe = true }){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -52,7 +50,7 @@ pub fn main() !void {
     // Load Input
     const input_file = fs.cwd().openFile("input.ppm", .{}) catch unreachable;
     defer input_file.close();
-    
+
     var input_ppm = PPMImage.init(allocator, input_file);
     defer input_ppm.deinit();
     input_ppm.readData() catch unreachable;
@@ -60,7 +58,7 @@ pub fn main() !void {
     // Load kernel files
     const inner_kernel_file = fs.cwd().openFile("smooth_inner_kernel.ppm", .{}) catch unreachable;
     defer inner_kernel_file.close();
-    
+
     const outer_kernel_file = fs.cwd().openFile("smooth_outer_kernel.ppm", .{}) catch unreachable;
     defer outer_kernel_file.close();
 
@@ -68,7 +66,7 @@ pub fn main() !void {
     var inner_kernel_ppm = PPMImage.init(allocator, inner_kernel_file);
     defer inner_kernel_ppm.deinit();
     inner_kernel_ppm.readData() catch unreachable;
-    
+
     var outer_kernel_ppm = PPMImage.init(allocator, outer_kernel_file);
     defer outer_kernel_ppm.deinit();
     outer_kernel_ppm.readData() catch unreachable;
@@ -99,7 +97,7 @@ pub fn main() !void {
     var swap_buffers_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 2, 130, 20, "SWAP BUFFERS");
     swap_buffers_btn.on_click = swap_buffers_on_click;
     swap_buffers_btn.on_click_state = @as(*anyopaque, @ptrCast(&wld.current_buffer));
-    
+
     var multithreading_btn = Button.init(10 + buffer_print_width + 10, 10 + 30 * 3, 130, 20, "TOGGLE THREADS");
     multithreading_btn.on_click = multithreading_on_click;
     multithreading_btn.on_click_state = @as(*anyopaque, @ptrCast(&use_multithreading));
@@ -113,10 +111,11 @@ pub fn main() !void {
     defer rl.closeWindow();
 
     // render texture for main buffer
-    const target = rl.loadRenderTexture(buffer_print_width, buffer_print_height);
+    const target = try rl.loadRenderTexture(buffer_print_width, buffer_print_height);
     const target_source = rl.Rectangle{ .x = 0.0, .y = 0.0, .width = buffer_print_width, .height = -buffer_print_height };
     const target_dest = rl.Rectangle{
-        .x = 10.0, .y = 10.0,
+        .x = 10.0,
+        .y = 10.0,
         .width = buffer_print_height,
         .height = buffer_print_height,
     };
@@ -150,7 +149,7 @@ pub fn main() !void {
             world_rule(&wld, inner_kernel, outer_kernel, use_multithreading, auto_swap);
             std.debug.print("RULE: {d}\n", .{sw.getTime()});
         }
-        
+
         world_draw(&wld, target, cam);
         { // drawing
             rl.beginDrawing();
@@ -158,7 +157,7 @@ pub fn main() !void {
 
             rl.clearBackground(rl.Color.ray_white);
             rl.drawTexturePro(target.texture, target_source, target_dest, rl.Vector2.zero(), 0.0, rl.Color.white);
-            rl.drawRectangleLinesEx(target_dest, 2.0, rl.Color{.r = 74, .g = 13, .b = 13, .a = 255});
+            rl.drawRectangleLinesEx(target_dest, 2.0, rl.Color{ .r = 74, .g = 13, .b = 13, .a = 255 });
 
             // draw UI
             play_pause_btn.draw();
@@ -171,17 +170,17 @@ pub fn main() !void {
         }
 
         if (rl.checkCollisionPointRec(rl.getMousePosition(), target_dest)) {
-            if (rl.isMouseButtonDown(.mouse_button_left)) {
+            if (rl.isMouseButtonDown(.left)) {
                 const mouse_pos = rl.getMousePosition().subtractValue(10.0).divide(rl.Vector2.init(scale, scale));
                 const pos = tp.Vec2.fromRaylib(mouse_pos).toVec2i();
-                   
+
                 var y = pos.y - 16;
                 while (y <= pos.y + 16) {
                     var x = pos.x - 16;
                     while (x <= pos.x + 16) {
                         const p = tp.Vec2i.new(x, y);
                         wld.setMainV(p, rand.boolean());
-                        x += 1; 
+                        x += 1;
                     }
                     y += 1;
                 }
@@ -207,13 +206,9 @@ fn world_rule_chunk(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel
             }
             const outer_avrg = outer_sum / @as(f32, @floatFromInt(outer_kernel.mask_list.items.len));
 
-            if (
-                inner_avrg >= 0.5 and 0.26 <= outer_avrg and outer_avrg <= 0.46
-            ) {
+            if (inner_avrg >= 0.5 and 0.26 <= outer_avrg and outer_avrg <= 0.46) {
                 wld.setBg(x, y, true);
-            } else if (
-                inner_avrg < 0.5 and 0.27 <= outer_avrg and outer_avrg <= 0.36
-            ) {
+            } else if (inner_avrg < 0.5 and 0.27 <= outer_avrg and outer_avrg <= 0.36) {
                 wld.setBg(x, y, true);
             } else {
                 wld.setBg(x, y, false);
@@ -230,7 +225,8 @@ fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel, use_
             if (thread_id != thread_count - 1) {
                 const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
                     wld,
-                    inner_kernel, outer_kernel,
+                    inner_kernel,
+                    outer_kernel,
                     thread_id * thread_workload,
                     thread_id * thread_workload + thread_workload,
                 }) catch unreachable;
@@ -239,7 +235,8 @@ fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel, use_
                 // if (thread_id * thread_workload >= buffer_height) continue;
                 const thread = std.Thread.spawn(.{}, world_rule_chunk, .{
                     wld,
-                    inner_kernel, outer_kernel,
+                    inner_kernel,
+                    outer_kernel,
                     thread_id * thread_workload,
                     buffer_height,
                 }) catch unreachable;
@@ -268,13 +265,9 @@ fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel, use_
                 }
                 const outer_avrg = outer_sum / @as(f32, @floatFromInt(outer_kernel.mask_list.items.len));
 
-                if (
-                    inner_avrg >= 0.5 and 0.26 <= outer_avrg and outer_avrg <= 0.46
-                ) {
+                if (inner_avrg >= 0.5 and 0.26 <= outer_avrg and outer_avrg <= 0.46) {
                     wld.setBg(x, y, true);
-                } else if (
-                    inner_avrg < 0.5 and 0.27 <= outer_avrg and outer_avrg <= 0.36
-                ) {
+                } else if (inner_avrg < 0.5 and 0.27 <= outer_avrg and outer_avrg <= 0.36) {
                     wld.setBg(x, y, true);
                 } else {
                     wld.setBg(x, y, false);
@@ -282,8 +275,10 @@ fn world_rule(wld: *world_type, inner_kernel: Kernel, outer_kernel: Kernel, use_
             }
         }
     }
-    
-    if (auto_swap) { wld.swapBuffers(); }
+
+    if (auto_swap) {
+        wld.swapBuffers();
+    }
 }
 
 fn world_draw(wld: *const world_type, target: rl.RenderTexture2D, camera: rl.Camera2D) void {
@@ -357,7 +352,7 @@ fn swap_buffers_on_click(optional_state: ?*anyopaque) void {
             .BACKGROUND_BUFFER => {
                 current_buffer.* = .MAIN_BUFFER;
                 return;
-            }
+            },
         }
     }
 }
